@@ -1,0 +1,382 @@
+<html>
+<head>
+<style>
+	.controls {
+		height: 100px;
+	}
+	
+	.chain .link {
+		float: left;
+		width: 100px;
+		height: 100px;
+		border: 1px solid black;
+		padding: 5px;
+		margin: 10px;
+		position: relative;
+	}
+	.chain .link .option {
+		color: gray;
+		font-size: .9em;
+		font-family: Sans Serif;
+	}
+	
+	.output {
+		clear: both;
+	}
+
+
+</style>
+
+<script type="text/javascript">
+	function $(sel, n) {
+		return (n || document).querySelector(sel);
+	}
+	function $all(sel, n) {
+		return (n || document).querySelectorAll(sel);
+	}
+
+	function $ev(sel, evs, cb) {
+		var a = evs.split(' ');
+		for(var ev of a) {
+			var ns = document.querySelectorAll(sel);
+			for(var n of ns) n.addEventListener(ev, cb);
+		}
+	}
+	function $selectVal(sel, n) {
+		var s = (n || document).querySelector(sel);
+		return s && s.selectedOptions && s.selectedOptions[0] && s.selectedOptions[0].value || null;
+	}
+	function $show(sel, n) {
+		var a = (n || document).querySelectorAll(sel);
+		for(var i = 0; i < a.length; i++) {
+			a[i].style.display = 'block';
+		}
+	}
+
+	function $hide(sel, n) {
+		var a = (n || document).querySelectorAll(sel);
+		for(var i = 0; i < a.length; i++) {
+			a[i].style.display = 'none';
+		}
+	}
+	
+	function mkElem(name, classes, contents) {
+		var e = document.createElement(name);
+		if(classes instanceof Array) {
+			e.classes = classes;
+		}
+		else e.className = classes;
+		
+		e.innerHTML = contents;
+		
+		return e;
+	}
+	
+	window.addEventListener('load', function() {
+		
+		$ev('.controls .transform-type', 'change', function(e) {
+			var val = e.target.selectedOptions[0].value;
+			
+			if(val == '') return;
+			
+			$hide('.controls .transform-option');
+			$show('.controls .'+val+'-options');
+			
+		})
+		
+		
+		$ev('.controls button[name="add"]', 'click', function(e) { // todo: debounce
+			var transf = $selectVal('.controls .transform-type');
+			
+			if(transf == '') return; // todo: error message
+			
+			var options = grabOptions('.controls .'+transf+'-options')
+			options.transform = transf;
+			
+			addTransform(-1, options);
+			
+			$hide('.controls .transform-option');
+			// TODO: reset values
+			$('.controls .transform-type').selectedOption = 0;
+		})
+		
+		$ev('.output button[name="solve"]', 'click', function(e) { // todo: debounce
+			if(chain.length == 0) return;
+			var cont = $('.output .results');
+			
+			for(var c of chain) {
+				var e = mkElem('div', 'matrix', '');
+				
+				var mat = getTransformMatrix(c);
+				
+				e.innerHTML = printXP(txtPrintFns, mat);
+				
+				cont.appendChild(e);
+			}
+			
+		});
+	});
+	
+	function grabOptions(sel) {
+		var cont = $all(sel + ' input');
+		var o = {};
+		
+		for(var opt of cont) {
+			console.log(opt);
+			o[opt.name] = opt.value;
+		}
+		
+		return o;
+	}
+	
+	var chain = [];
+	
+	function addTransform(index, options) {
+		if(index == -1) {
+			chain.push(options);
+		}
+		else {
+			chain.splice(index, 0, options);
+		}
+		renderChain($('.chain'), chain);
+	}
+	
+
+	
+	function renderChain(target, chain) {
+		target.innerHTML = '';
+		
+		for(var c of chain) {
+			var d = document.createElement('div');
+			d.className = 'link';
+			
+			var name = document.createElement('div');
+			name.className = 'name';
+			name.innerHTML = c.transform;
+			d.appendChild(name);
+			
+			if(c.X) {
+				d.appendChild(mkElem('div', 'option', '[' + c.X + ', ' + c.Y + ', ' + c.Z + ']'));
+			}
+			if(c.Theta) {
+				d.appendChild(mkElem('div', 'option', 'Theta: ' + c.Theta));
+			}
+			
+			
+			target.appendChild(d);
+		} 
+	}
+	
+	var txtPrintFns = {
+		cos: function(fns, xp) { return 'cos(' + printXP(fns, xp.arg1) + ')'; },
+		sin: function(fns, xp) { return 'sin(' + printXP(fns, xp.arg1) + ')'; },
+		neg: function(fns, xp) { return '-' + printXP(fns, xp.arg1); },
+		mul: function(fns, xp) { return printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); },
+		add: function(fns, xp) { 
+// 			if(is_negative(xp.arg2)) {
+				return printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2); 
+// 			}
+// 			else {
+// 				return printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2); 
+// 			}
+		},
+		mat: function(fns, xp) {
+			var acc = '[';
+			for(var a = 0; a < 4; a++) {
+				acc += '[';
+				for(var b = 0; b < 4; b++) {
+					acc += printXP(fns, xp.arg1[a][b]) + ', ';
+				}
+				acc += ']';
+			}
+			acc += ']';
+			return acc;
+		}
+	}
+	
+	
+	function printXP(fns, xp) {
+		console.log(xp, typeof(xp));
+		if(typeof(xp) == 'object') return fns[xp.op](fns, xp);
+		else return xp;
+	}
+	
+	
+	function is_negative(xp) {
+		if(typeof(xp) == 'object') {
+			if(xp.op == 'neg') {
+				return !is_negative(xp.arg1);
+			}
+			
+			return false;
+		}
+		
+		var v = parseFloat(v);
+		return v < 0;
+	}
+	
+	function identMatrix() {
+		return {op: 'mat', arg1: [
+			[1, 0, 0, 0],
+			[0, 1, 0, 0],
+			[0, 0, 1, 0],
+			[0, 0, 0, 1],
+		]};
+	}
+	
+	function cos(x) { return {op: 'cos', arg1: x}; };
+	function sin(x) { return {op: 'sin', arg1: x}; };
+	function neg(x) { return {op: 'neg', arg1: x}; };
+	function mul(x, y) { return {op: 'mul', arg1: x, arg2: y}; };
+	function add(x, y) { 
+		if(x instanceof Array) return {op: 'add', arg1ist: x};
+		else return {op: 'add', arg1: x, arg2: y}; 
+	};
+	function oneminus(x) { 
+		return add(1, neg(x));
+	};
+	function sq(x) { 
+		return mul(x, x);
+	};
+	
+	function getTransformMatrix(xfm) {
+		if(xfm.transform == 'rotX') {
+			return {op: 'mat', arg1: [
+				[1, 0,              0,                   0],
+				[0, cos(xfm.Theta), neg(sin(xfm.Theta)), 0],
+				[0, sin(xfm.Theta),     cos(xfm.Theta),  0],
+				[0, 0,              0,                   1],
+			]};
+		}
+		else if(xfm.transform == 'rotY') {
+			return {op: 'mat', arg1: [
+				[cos(xfm.Theta),      0, sin(xfm.Theta), 0],
+				[0,                   1, 0,              0],
+				[neg(sin(xfm.Theta)), 0, cos(xfm.Theta), 0],
+				[0,                   0, 0,              1],
+			]};
+		}
+		else if(xfm.transform == 'rotZ') {
+			return {op: 'mat', arg1: [
+				[cos(xfm.Theta), neg(sin(xfm.Theta)), 0, 0],
+				[sin(xfm.Theta), cos(xfm.Theta),      0, 0],
+				[0,              0,                   1, 0],
+				[0,              0,                   0, 1],
+			]};
+		}
+		else if(xfm.transform == 'rotZ') {
+			return {op: 'mat', arg1: [
+				[cos(xfm.Theta), neg(sin(xfm.Theta)), 0, 0],
+				[sin(xfm.Theta), cos(xfm.Theta),      0, 0],
+				[0,              0,                   1, 0],
+				[0,              0,                   0, 1],
+			]};
+		}
+		else if(xfm.transform == 'scale') {
+			return {op: 'mat', arg1: [
+				[xfm.X, 0,     0,     0],
+				[0,     xfm.Y, 0,     0],
+				[0,     0,     xfm.Z, 0],
+				[0,     0,     0,     1],
+			]};
+		}
+		else if(xfm.transform == 'translate') {
+			return {op: 'mat', arg1: [
+				[1, 0, 0, xfm.X],
+				[0, 1, 0, xfm.Y],
+				[0, 0, 1, xfm.Z],
+				[0, 0, 0, 1],
+			]};
+		}
+		else if(xfm.transform == 'rotAxis') {
+			var c = cos(xfm.Theta);
+			var s = sin(xfm.Theta);
+			var omc = oneminus(cos(xfm.Theta));
+			return {op: 'mat', arg1: [
+				[
+					add(mul(omc, mul(xfm.X, xfm.X)), c), 
+					add(mul(omc, mul(xfm.X, xfm.Y)), mul(s, xfm.Z)),
+					add(mul(omc, mul(xfm.X, xfm.Z)), mul(neg(s), xfm.Y)),
+					0
+				],
+				[
+					add(mul(omc, mul(xfm.Y, xfm.X)), mul(neg(s), xfm.Z)), 
+					add(mul(omc, mul(xfm.Y, xfm.Y)), c), 
+					add(mul(omc, mul(xfm.Y, xfm.Z)), mul(s, xfm.X)), 
+					0
+				],
+				[
+					add(mul(omc, mul(xfm.Z, xfm.X)), mul(s, xfm.Y)), 
+					add(mul(omc, mul(xfm.Z, xfm.Y)), mul(neg(s), xfm.X)), 
+					add(mul(omc, mul(xfm.Z, xfm.Z)), c), 
+					0
+				],
+				[0, 0, 0, 1],
+			]};
+		}
+		
+	}
+	
+</script>
+
+</head>
+<body>
+	
+	<div class="controls">
+		<select class="transform-type">
+			<option value="">-- Select Transformation --</option>
+			<option value="rotX">Rotation about X</option>
+			<option value="rotY">Rotation about Y</option>
+			<option value="rotZ">Rotation about Z</option>
+			<option value="rotAxis">Rotation about Axis</option>
+			<option value="translate">Translation</option>
+			<option value="scale">Scale</option>
+		</select>
+		
+		<div class="rotX-options transform-option" style="display:none;">
+			<label>Theta</label><input type="edit" name="Theta" value="0"></input>
+		</div>
+		<div class="rotY-options transform-option" style="display:none;">
+			<label>Theta</label><input type="edit" name="Theta" value="0"></input>
+		</div>
+		<div class="rotZ-options transform-option" style="display:none;">
+			<label>Theta</label><input type="edit" name="Theta" value="0"></input>
+		</div>
+		
+		<div class="rotAxis-options transform-option" style="display:none;">
+			<label>Axis X</label><input type="edit" name="X" value="0"></input>
+			<label>Axis Y</label><input type="edit" name="Y" value="0"></input>
+			<label>Axis Z</label><input type="edit" name="Z" value="0"></input>
+			<label>Theta</label><input type="edit" name="Theta" value="0"></input>
+		</div>
+		
+		<div class="translate-options transform-option" style="display:none;">
+			<label>X</label><input type="edit" name="X" value="0"></input>
+			<label>Y</label><input type="edit" name="Y" value="0"></input>
+			<label>Z</label><input type="edit" name="Z" value="0"></input>
+		</div>
+		
+		<div class="scale-options transform-option" style="display:none;">
+			<label>X</label><input type="edit" name="X" value="0"></input>
+			<label>Y</label><input type="edit" name="Y" value="0"></input>
+			<label>Z</label><input type="edit" name="Z" value="0"></input>
+		</div>
+		
+		<button name="add">Add</button>
+		
+	</div>
+	
+	<div class="chain">
+		
+		
+	</div>
+	
+	<div class="output">
+		<button name="solve">Solve</button>
+		
+		<div class="results"></div> 
+		
+	</div>
+	
+</body>
+</html>
