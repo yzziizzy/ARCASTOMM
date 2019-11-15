@@ -100,6 +100,9 @@
 			$('.controls .transform-type').selectedOption = 0;
 		})
 		
+		addTransform(-1, {transform: 'rotAxis', X: 4, Y:5, Z: 6, Theta: 2});
+		addTransform(-1, {transform: 'rotAxis', X: 7, Y:2, Z: 9, Theta: 1});
+		
 		$ev('.output button[name="solve"]', 'click', function(e) { // todo: debounce
 			if(chain.length == 0) return;
 			var cont = $('.output .results');
@@ -138,24 +141,42 @@
 			
 			
 			cont.innerHTML = printXP(txtPrintFns, mchain);
-			var mod1, mod2;
-			for(var i = 0; i < 100; i++) {
-				[mod1, mchain] = optimize_op(mchain, constant_fold);
-				if(mod1) {
-					continue;
-				}
-				else {
-					console.log("optimization rounds: " + (i + 1));
-					break;
-				}
-			}
 			
+			mchain = fullyOptimize(mchain, [constant_fold]);
+			mchain = fullyOptimize(mchain, [distribute_terms]);
+			mchain = fullyOptimize(mchain, [constant_fold]);
+			mchain = fullyOptimize(mchain, [distribute_terms]);
+			mchain = fullyOptimize(mchain, [constant_fold]);
 			
+			console.log(mchain);
 			
 			cont.innerHTML = printXP(txtPrintFns, mchain);
 			
 		});
 	});
+	
+	function fullyOptimize(input, fns) {
+		
+		var mod;
+		for(var i = 0; i < 100; i++) {
+			var m = false;
+			for(var fn of fns) {
+				[mod, input] = optimize_op(input, fn);
+				m = m || mod;
+			}
+			
+			if(m) {
+				continue;
+			}
+			else {
+// 				console.log("optimization rounds: " + (i + 1));
+				break;
+			}
+		}
+		
+		return input;
+	}
+	
 	
 	function grabOptions(sel) {
 		var cont = $all(sel + ' input');
@@ -206,18 +227,34 @@
 		} 
 	}
 	
+	function is_op(xp, op) {
+		return (typeof(xp) == 'object' && xp.op == op);
+	}
+	
 	var txtPrintFns = {
 		cos: function(fns, xp) { return 'cos(' + printXP(fns, xp.arg1) + ')'; },
 		sin: function(fns, xp) { return 'sin(' + printXP(fns, xp.arg1) + ')'; },
 		neg: function(fns, xp) { return '-' + printXP(fns, xp.arg1); },
-		mul: function(fns, xp) { return printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); },
+		mul: function(fns, xp) { 
+			if(is_op(xp.arg1, 'add') && is_op(xp.arg2, 'add')) {
+				return printXP(fns, xp.arg1) + printXP(fns, xp.arg2);
+			}
+			if((is_num(xp.arg1) || is_builtin(xp.arg1)) && is_op(xp.arg2, 'add')) {
+				return printXP(fns, xp.arg1) + printXP(fns, xp.arg2);
+			}
+			if((is_num(xp.arg2) || is_builtin(xp.arg2)) && is_op(xp.arg1, 'add')) {
+				return printXP(fns, xp.arg2) + printXP(fns, xp.arg1);
+			}
+			
+			return printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); 
+		},
 		add: function(fns, xp) { 
-// 			if(is_negative(xp.arg2)) {
+ 			if(is_op(xp.arg2, 'neg')) {
+				return '(' + printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2.arg1) + ')'; 
+			}
+			else {
 				return '(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')'; 
-// 			}
-// 			else {
-// 				return printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2); 
-// 			}
+			}
 		},
 		mat: function(fns, xp) {
 			var acc = '[';
@@ -229,6 +266,15 @@
 				acc += ']';
 			}
 			acc += ']';
+			return acc;
+		},
+		term: function(fns, xp) {
+			var acc = '' + (xp.arg1 == 1 ? '' : xp.arg1);
+			
+			for(var c of xp.arg2) {
+				acc += printXP(fns, c);
+			}
+			acc += '';
 			return acc;
 		}
 	}
@@ -355,19 +401,94 @@
 		
 	}
 	
-	function is_const(xp) {
+	function grow_term(a, b) {
+		var t = {op: 'term', arg1: 1.0, arg2: [] };
+		
+		if(typeof a == 'object' && a.op == 'neg') {
+			t.arg1 = !t.arg1;
+			a = a.arg1;
+		}
+		if(typeof b == 'object' && b.op == 'neg') {
+			t.arg1 = !t.arg1;
+			b = b.arg1;
+		}
+		
+// 		if(is_num(a)) {
+// 			t.rat.t += t.rat.b * Math.abs(a);
+// 			t.neg = t.neg ^ (a < 0);
+// 		}
+		if(is_num(a)) {
+			t.arg1 *= Math.abs(a);
+			t.neg ^= (a < 0);
+		}
+		if(is_num(b)) {
+			t.arg1 *= Math.abs(b);
+			t.neg ^= (b < 0);
+		}
+		
+		
+		if(is_builtin(a)) {
+			// temp: addit straight in
+			// todo: square duplicates
+			t.arg2.push(a);
+		}
+		if(is_builtin(b)) {
+			// temp: addit straight in
+			// todo: square duplicates
+			t.arg2.push(b);
+		}
+		
+		if(is_op(a, 'term')) {
+			t.arg1 *= a.arg1;
+			t.arg2 = t.arg2.concat(a.arg2)
+		}
+		if(is_op(b, 'term')) {
+			t.arg1 *= b.arg1;
+			t.arg2 = t.arg2.concat(b.arg2)
+		}
+		
+		
+		if(is_op(a, 'add')) { // from a simple term
+			t.arg2.push(a)
+		}
+		if(is_op(b, 'add')) { // from a simple term
+			t.arg2.push(b)
+		}
+		
+
+		
+		return t;
+	}
+	
+	function is_num(xp) {
 		return typeof(xp) == 'number';
+	}
+	function is_builtin(xp) {
+		if(typeof(xp) != 'object') return false;
+		if(xp.op == 'cos' || xp.op == 'sin' || xp.op == 'neg') return true;
+		return false;
+	}
+	function is_const(xp) {
+		return is_num(xp) || (is_builtin(xp) && is_const(xp.arg1));
+	}
+	function is_simple_term(xp) {
+		if(is_num(xp) || (is_builtin(xp) && is_const(xp.arg1))) return true;
+		if(xp.op == 'add') {
+			if(!(is_num(xp.arg1) || is_num(xp.arg2))) return false;
+			if(!(is_builtin(xp.arg1) || is_builtin(xp.arg2))) return false;
+			return true;
+		}
 	}
 	function is_matrix(xp) {
 		return typeof(xp) == 'object' && xp.op == 'mat';
 	}
 	
-	function constant_fold(op, a1, a2) {
+	function constant_fold(op, a1, a2, xp) {
 		
 		if(op == 'add') {
 			if(a1 == 0) return a2;
 			if(a2 == 0) return a1;
-			if(is_const(a1) && is_const(a2)) {
+			if(is_num(a1) && is_num(a2)) {
 				return a1 + a2;
 			}
 		}
@@ -380,19 +501,39 @@
 			if(a1 == 0 || a2 == 0) { 
 				return 0 
 			}
-			if(is_const(a1) && is_const(a2)) {
+			if(is_num(a1) && is_num(a2)) {
 				return a1 * a2;
 			}
 			
-			// not exactly constant folding
+			
+			// not exactly constant folding below here
+			
 			if(is_matrix(a1) && is_matrix(a2)) {
 				return mat_mul(a1, a2);
 			}
+			
+			if(is_simple_term(a1) && is_simple_term(a2)) {
+				return grow_term(a1, a2);
+			}
+			
+			if(is_op(a1, 'term') && is_simple_term(a2)) {
+				return grow_term(a1, a2);
+			}
+			if(is_simple_term(a1) && is_op(a2, 'term')) {
+				return grow_term(a1, a2);
+			}
+			if(is_op(a1, 'term') && is_op(a2, 'term')) {
+				return grow_term(a1, a2);
+			}
+		}
+		
+		if(op == 'term') {
+			if(a1 == 0) return 0;
 		}
 		
 		if(op == 'neg') {
 			if(a1 == 0) return 0;
-			if(is_const(a1)) {
+			if(is_num(a1)) {
 				return -a1;
 			}
 		}
@@ -423,13 +564,47 @@
 					mul(a[c][3], b[3][r])));
 			}
 		}
-		console.log(out);
+		
 		return {op: 'mat', arg1: out};
+	}
+	
+	// applies the distributive property of multiplication and addition widely
+	function distribute_terms(op, a1, a2, xp) {
+		if(op == 'mul') {
+			if(is_op(a1, 'add') && is_op(a2, 'add')) {
+				
+				return add(
+					add(mul(a1.arg1, a2.arg1), mul(a1.arg2, a2.arg2)),
+					add(mul(a1.arg2, a2.arg1), mul(a1.arg2, a2.arg1))
+				);
+			}
+			
+			if(is_op(a1, 'add') && is_op(a2, 'term')) {
+				
+				return add(mul(a1.arg1, a2), mul(a1.arg2, a2));
+			}
+			
+			if(is_op(a1, 'term') && is_op(a2, 'add')) {
+				
+				return add(mul(a2.arg1, a1), mul(a2.arg2, a1));
+			}
+		}
+		
+		return false;
 	}
 	
 	function optimize_op(xp, fn) {
 		if(typeof(xp) != 'object') {
 			return [false, xp];
+		}
+		if(xp instanceof Array) {
+			var m = false;
+			var o = xp.map(function(x) { 
+				var [m1, o1] = optimize_op(x, fn);
+				m = m || m1;
+				return o1;
+			});
+			return [m, o];
 		}
 		
 		var modified = false;
@@ -451,9 +626,10 @@
 		var [m1, a1] = optimize_op(xp.arg1, fn);
 		var [m2, a2] = optimize_op(xp.arg2, fn);
 		
-		var out = fn(xp.op, a1, a2);
+		var out = fn(xp.op, a1, a2, xp);
 		
 		if(out === false) {
+			
 			return [m1 || m2, {op: xp.op, arg1: a1, arg2: a2}];
 		}
 		else return [true, out];
