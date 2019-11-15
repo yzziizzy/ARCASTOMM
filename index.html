@@ -104,6 +104,8 @@
 			if(chain.length == 0) return;
 			var cont = $('.output .results');
 			
+			var mchain = null; 
+			
 			for(var c of chain) {
 				var e = mkElem('div', 'matrix', '');
 				
@@ -122,10 +124,35 @@
 				}
 // 				var mat = getTransformMatrix(c);
 				
-				e.innerHTML = printXP(txtPrintFns, mat);
+				if(mchain === null) {
+					mchain = mat;
+				}
+				else {
+					mchain = {op: 'mul', arg1: mat, arg2: mchain };
+				}
 				
-				cont.appendChild(e);
+// 				e.innerHTML = printXP(txtPrintFns, mat);
+				
+// 				cont.appendChild(e);
 			}
+			
+			
+			cont.innerHTML = printXP(txtPrintFns, mchain);
+			var mod1, mod2;
+			for(var i = 0; i < 100; i++) {
+				[mod1, mchain] = optimize_op(mchain, constant_fold);
+				if(mod1) {
+					continue;
+				}
+				else {
+					console.log("optimization rounds: " + (i + 1));
+					break;
+				}
+			}
+			
+			
+			
+			cont.innerHTML = printXP(txtPrintFns, mchain);
 			
 		});
 	});
@@ -135,7 +162,7 @@
 		var o = {};
 		
 		for(var opt of cont) {
-			o[opt.name] = opt.value;
+			o[opt.name] = parseFloat(opt.value);
 		}
 		
 		return o;
@@ -331,6 +358,9 @@
 	function is_const(xp) {
 		return typeof(xp) == 'number';
 	}
+	function is_matrix(xp) {
+		return typeof(xp) == 'object' && xp.op == 'mat';
+	}
 	
 	function constant_fold(op, a1, a2) {
 		
@@ -343,11 +373,20 @@
 		}
 		
 		if(op == 'mul') {
+			if(a1 == 1) return a2;
+			if(a1 == -1) return neg(a2);
+			if(a2 == 1) return a1;
+			if(a2 == -1) return neg(a1);
 			if(a1 == 0 || a2 == 0) { 
 				return 0 
 			}
 			if(is_const(a1) && is_const(a2)) {
 				return a1 * a2;
+			}
+			
+			// not exactly constant folding
+			if(is_matrix(a1) && is_matrix(a2)) {
+				return mat_mul(a1, a2);
 			}
 		}
 		
@@ -370,6 +409,23 @@
 		return false;
 	}
 	
+	function mat_mul(aa, bb) {
+		var a = aa.arg1;
+		var b = bb.arg1;
+		var out = [[],[],[],[]];
+		
+		for(r = 0; r < 4; r++) {
+			for(c = 0; c < 4; c++) {
+				out[c][r] = add(add(
+					mul(a[c][0], b[0][r]), 
+					mul(a[c][1], b[1][r])), add( 
+					mul(a[c][2], b[2][r]),
+					mul(a[c][3], b[3][r])));
+			}
+		}
+		console.log(out);
+		return {op: 'mat', arg1: out};
+	}
 	
 	function optimize_op(xp, fn) {
 		if(typeof(xp) != 'object') {
