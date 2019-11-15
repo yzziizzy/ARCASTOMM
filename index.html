@@ -23,6 +23,22 @@
 	.output {
 		clear: both;
 	}
+	
+	
+	._add, ._mul, ._neg, ._term, ._sin, ._cos, ._ovar, ._uvar {
+		display: inline-block;
+		white-space: nowrap;
+		padding: 2px;
+	}
+	
+	._add { border: 2px solid purple; }
+	._mul { border: 2px solid green; }
+	._neg { border: 2px solid gray; }
+	._term { border: 2px solid orange; }
+	._sin { border: 2px solid pink; }
+	._cos { border: 2px solid pink; }
+	._ovar { border: 2px solid black; }
+	._uvar { border: 2px solid silver; }
 
 
 </style>
@@ -102,6 +118,8 @@
 		
 		addTransform(-1, {transform: 'rotAxis', X: 4, Y:5, Z: 6, Theta: 2});
 		addTransform(-1, {transform: 'rotAxis', X: 7, Y:2, Z: 9, Theta: 1});
+		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
+		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
 		
 		$ev('.output button[name="solve"]', 'click', function(e) { // todo: debounce
 			if(chain.length == 0) return;
@@ -140,21 +158,129 @@
 			}
 			
 			
-			cont.innerHTML = printXP(txtPrintFns, mchain);
+// 			cont.innerHTML = printXP(txtPrintFns, mchain);
 			
-			mchain = fullyOptimize(mchain, [constant_fold]);
-			mchain = fullyOptimize(mchain, [distribute_terms]);
-			mchain = fullyOptimize(mchain, [constant_fold]);
-			mchain = fullyOptimize(mchain, [distribute_terms]);
-			mchain = fullyOptimize(mchain, [constant_fold]);
+			mchain = fullyOptimize(mchain, [constant_fold, distribute_terms, combine_terms]);
+// 			mchain = fullyOptimize(mchain, [distribute_terms]);
+// 			mchain = fullyOptimize(mchain, [constant_fold]);
+// 			mchain = fullyOptimize(mchain, [distribute_terms]);
+// 			mchain = fullyOptimize(mchain, [constant_fold]);
+// 			mchain = fullyOptimize(mchain, [distribute_terms]);
+// 			mchain = fullyOptimize(mchain, [constant_fold]);
 			
-			console.log(mchain);
+			var context = {
+				xp: mchain,
+				vardef: {},
+				varalloc: {},
+				varnum: 1,
+			};
 			
-			cont.innerHTML = printXP(txtPrintFns, mchain);
+// 			factor_ovars(context);
+// 			factor_ovars(context);
+			
+// 			context.xp = fullyOptimize(context.xp, [combine_terms]);
+			
+			cont.innerHTML = printXP(debugPrintFns, context.xp);
 			
 		});
 	});
 	
+	function factor_ovars(context) {
+		
+		var term_pairs = [];
+		var terms = {};
+		
+		function addTerms(list) {
+			var key = list.sort().join(':');
+			
+		}
+		
+		
+		walk_ops(context.xp, function(xp) {
+			if(xp.op == 'term') {
+				console.log('len', xp.arg2.length);
+				for(t1 in xp.arg2) {
+					for(var t2 = t1|0 + 1; t2 < xp.arg2.length; t2++) {
+						
+						var p = printXP(txtPrintFns, xp.arg2[t1]);
+						var q = printXP(txtPrintFns, xp.arg2[t2]);
+						var key = p+':'+q;
+						terms[key] = [xp.arg2[t1], xp.arg2[t2]];
+						term_pairs.push(key);
+					}
+				}
+			}
+			
+		});
+		
+		
+		
+		
+		var counts = {}
+		
+		term_pairs.map(function(x) {
+			counts[x] = (counts[x]|0) + 1;
+		});
+		
+		console.log('counts', counts);
+		
+		
+		var varalloc = {};
+		var vardef = {};
+		var acounts = [];
+		for(var k in counts) { 
+			acounts.push([counts[k], k]); 
+			var v = 'o'+(context.varnum++);
+			context.varalloc[k] = v;
+			context.vardef[v] = terms[k];
+		}
+		
+		var aa = acounts.sort(function(a,b) { return b[0] - a[0] });
+		
+		console.log(aa);
+		
+		[xxx, context.xp] = optimize_op(context.xp, function(op, a1, a2) {
+			if(op == 'term') {
+				var out_arg2 = [];
+			
+				for(var t2 = 1; t2 < a2.length; t2++) {
+					
+					var p = printXP(txtPrintFns, a2[t2 - 1]);
+					var q = printXP(txtPrintFns, a2[t2]);
+					var key = p+':'+q;
+					
+					if(!context.varalloc[key]) {
+						out_arg2.push(a2[t2 - 1]);
+						continue;
+					}
+					
+					out_arg2.push({op: 'ovar', arg1: context.varalloc[key]});
+					t2++;
+					
+// 							terms[key] = [xp.arg2[t1], xp.arg2[t2]];
+// 							term_pairs.push(key);
+				}
+				
+				if(t2 <= a2.length) { // BUG: this may be borked
+					out_arg2.push(a2[a2.length - 1]);
+				}
+				
+				return {
+					op: 'term',
+					arg1: a1,
+					arg2: out_arg2,
+				}
+			}
+			
+			return false;
+		});
+		
+	}
+	
+	
+	
+	
+	// runs a set of optimization functions until they all stabilize
 	function fullyOptimize(input, fns) {
 		
 		var mod;
@@ -183,7 +309,12 @@
 		var o = {};
 		
 		for(var opt of cont) {
-			o[opt.name] = parseFloat(opt.value);
+			if(parseFloat(opt.value) == opt.value) {
+				o[opt.name] = parseFloat(opt.value);
+			}
+			else {
+				o[opt.name] = uvar(opt.value);
+			}
 		}
 		
 		return o;
@@ -232,6 +363,8 @@
 	}
 	
 	var txtPrintFns = {
+		ovar: function(fns, xp) { return xp.arg1 + ''; },
+		uvar: function(fns, xp) { return xp.arg1 + ''; },
 		cos: function(fns, xp) { return 'cos(' + printXP(fns, xp.arg1) + ')'; },
 		sin: function(fns, xp) { return 'sin(' + printXP(fns, xp.arg1) + ')'; },
 		neg: function(fns, xp) { return '-' + printXP(fns, xp.arg1); },
@@ -279,6 +412,106 @@
 		}
 	}
 	
+	var htmlPrintFns = {
+		ovar: function(fns, xp) { return '<b>' + xp.arg1 + '</b>'; },
+		uvar: function(fns, xp) { return '<b>' + xp.arg1 + '</b>'; },
+		cos: function(fns, xp) { return '<i>cos</i>(' + printXP(fns, xp.arg1) + ')'; },
+		sin: function(fns, xp) { return '<i>sin</i>(' + printXP(fns, xp.arg1) + ')'; },
+		neg: function(fns, xp) { return '-' + printXP(fns, xp.arg1); },
+		mul: function(fns, xp) { 
+			if(is_op(xp.arg1, 'add') && is_op(xp.arg2, 'add')) {
+				return printXP(fns, xp.arg1) + printXP(fns, xp.arg2);
+			}
+			if((is_num(xp.arg1) || is_builtin(xp.arg1)) && is_op(xp.arg2, 'add')) {
+				return printXP(fns, xp.arg1) + printXP(fns, xp.arg2);
+			}
+			if((is_num(xp.arg2) || is_builtin(xp.arg2)) && is_op(xp.arg1, 'add')) {
+				return printXP(fns, xp.arg2) + printXP(fns, xp.arg1);
+			}
+			
+			return printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); 
+		},
+		add: function(fns, xp) { 
+ 			if(is_op(xp.arg2, 'neg')) {
+				return '(' + printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2.arg1) + ')'; 
+			}
+			else {
+				return '(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')'; 
+			}
+		},
+		mat: function(fns, xp) {
+			var acc = '<table class="matrix">';
+			for(var a = 0; a < 4; a++) {
+				acc += '<tr>';
+				for(var b = 0; b < 4; b++) {
+					acc += '<td>' + printXP(fns, xp.arg1[a][b]) + '</td>';
+				}
+				acc += '</tr>';
+			}
+			acc += '</table>';
+			return acc;
+		},
+		term: function(fns, xp) {
+			var acc = '' + (xp.arg1 == 1 ? '' : xp.arg1);
+			
+			for(var c of xp.arg2) {
+				acc += printXP(fns, c);
+			}
+			acc += '';
+			return acc;
+		}
+	}
+	
+	var debugPrintFns = {
+		ovar: function(fns, xp) { return '<span class="_ovar">' + xp.arg1 + '</span>'; },
+		uvar: function(fns, xp) { return '<<span class="_ovar">' + xp.arg1 + '</span>'; },
+		cos: function(fns, xp) { return '<span class="_cos">cos(' + printXP(fns, xp.arg1) + ')</span>'; },
+		sin: function(fns, xp) { return '<span class="_sin">sin(' + printXP(fns, xp.arg1) + ')</span>'; },
+		neg: function(fns, xp) { return '<span class="_neg">-' + printXP(fns, xp.arg1) + '</span>'; },
+		mul: function(fns, xp) { 
+			if(is_op(xp.arg1, 'add') && is_op(xp.arg2, 'add')) {
+				return '<span class="_mul">' + printXP(fns, xp.arg1) + printXP(fns, xp.arg2) + '</span>';
+			}
+			if((is_num(xp.arg1) || is_builtin(xp.arg1)) && is_op(xp.arg2, 'add')) {
+				return '<span class="_mul">' + printXP(fns, xp.arg1) + printXP(fns, xp.arg2) + '</span>';
+			}
+			if((is_num(xp.arg2) || is_builtin(xp.arg2)) && is_op(xp.arg1, 'add')) {
+				return '<span class="_mul">' + printXP(fns, xp.arg2) + printXP(fns, xp.arg1) + '</span>';
+			}
+			
+			return '<span class="_mul">' + printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); 
+		},
+		add: function(fns, xp) { 
+ 			if(is_op(xp.arg2, 'neg')) {
+				return '<span class="_add">(' + printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2.arg1) + ')</span>'; 
+			}
+			else {
+				return '<span class="_add">(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')</span>'; 
+			}
+		},
+		mat: function(fns, xp) {
+			var acc = '<table class="matrix _matrix">';
+			for(var a = 0; a < 4; a++) {
+				acc += '<tr>';
+				for(var b = 0; b < 4; b++) {
+					acc += '<td>' + printXP(fns, xp.arg1[a][b]) + '</td>';
+				}
+				acc += '</tr>';
+			}
+			acc += '</table>';
+			return acc;
+		},
+		term: function(fns, xp) {
+			var acc = '<span class="_term">' + (xp.arg1 == 1 ? '' : xp.arg1);
+			
+			for(var c of xp.arg2) {
+				acc += printXP(fns, c);
+			}
+			acc += '</span>';
+			return acc;
+		}
+	}
+	
 	
 	function printXP(fns, xp) {
 		if(typeof(xp) == 'object') return fns[xp.op](fns, xp);
@@ -308,6 +541,8 @@
 		]};
 	}
 	
+	function ovar(x) { return {op: 'ovar', arg1: x}; };
+	function uvar(x) { return {op: 'uvar', arg1: x}; };
 	function cos(x) { return {op: 'cos', arg1: x}; };
 	function sin(x) { return {op: 'sin', arg1: x}; };
 	function neg(x) { return {op: 'neg', arg1: x}; };
@@ -469,7 +704,7 @@
 		return false;
 	}
 	function is_const(xp) {
-		return is_num(xp) || (is_builtin(xp) && is_const(xp.arg1));
+		return is_num(xp) || (is_builtin(xp) && is_const(xp.arg1)) || is_op(xp, 'uvar');
 	}
 	function is_simple_term(xp) {
 		if(is_num(xp) || (is_builtin(xp) && is_const(xp.arg1))) return true;
@@ -568,6 +803,31 @@
 		return {op: 'mat', arg1: out};
 	}
 	
+	function terms_are_equal(a, b) {
+		var aa = a.arg2.slice().map(function(xp) { return printXP(txtPrintFns, xp) }).sort().join(':');
+		var bb = b.arg2.slice().map(function(xp) { return printXP(txtPrintFns, xp) }).sort().join(':');
+		return aa == bb;
+	}
+	
+	function combine_terms(op, a1, a2, xp) {
+		if(op == 'add') {
+			if(is_op(a1, 'term') && is_op(a2, 'term')) {
+				if(terms_are_equal(a1, a2)) {
+					var sum = a1.arg1 + a2.arg1;
+					if(sum == 0) return 0;
+					
+					return {
+						op: 'term',
+						arg1: sum,
+						arg2: a1.arg2,
+					}
+				}
+			}
+		}
+		
+		return false;
+	}
+	
 	// applies the distributive property of multiplication and addition widely
 	function distribute_terms(op, a1, a2, xp) {
 		if(op == 'mul') {
@@ -587,6 +847,13 @@
 			if(is_op(a1, 'term') && is_op(a2, 'add')) {
 				
 				return add(mul(a2.arg1, a1), mul(a2.arg2, a1));
+			}
+			
+			if((is_num(a1) || is_builtin(a1)) && is_op(a2, 'add')) {
+				return add(mul(a1, a2.arg1), mul(a1, a2.arg2));
+			}
+			if((is_num(a2) || is_builtin(a2)) && is_op(a1, 'add')) {
+				return add(mul(a2, a1.arg1), mul(a2, a1.arg2));
 			}
 		}
 		
@@ -633,6 +900,32 @@
 			return [m1 || m2, {op: xp.op, arg1: a1, arg2: a2}];
 		}
 		else return [true, out];
+	}
+	
+	function walk_ops(xp, fn) {
+		if(typeof(xp) != 'object') {
+			return;
+		}
+		if(xp instanceof Array) {
+			xp.map(function(x) { 
+				walk_ops(x, fn);
+			});
+			return;
+		}
+		
+		if(xp.op == 'mat') {
+			for(var a = 0; a < 4; a++) {
+				for(var b = 0; b < 4; b++) {
+					walk_ops(xp.arg1[a][b], fn);
+				}
+			}
+			return;
+		}
+		
+		walk_ops(xp.arg1, fn);
+		walk_ops(xp.arg2, fn);
+		
+		fn(xp);
 	}
 	
 	
