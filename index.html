@@ -175,8 +175,14 @@
 				varnum: 1,
 			};
 			
-//  			factor_ovars(context);
-//  			factor_ovars(context);
+			factor_ovars(context);
+			factor_ovars(context);
+			
+			for(var k in context.vardef) {
+				var d = printXP(debugPrintFns, context.vardef[k][0]);
+				d += printXP(debugPrintFns, context.vardef[k][1]);
+				$('.vars').appendChild(mkElem('div', '', k + ' = ' + d));
+			}
 			
 // 			context.xp = fullyOptimize(context.xp, [combine_terms]);
 			
@@ -865,7 +871,13 @@
 			}
 			
 			if(t_add.length > 0) {
-				term.arg2 = term.arg2.concat(t_add);
+				for(var t of t_add) {
+					if(is_op(t, 'neg')) {
+						term.arg1 *= -1;
+						t = t.arg1;
+					}
+					term.arg2.push(t);
+				}
 			}
 			
 			if(term.arg2.length > 0) {
@@ -1217,6 +1229,7 @@
 		<button name="solve">Solve</button>
 		
 		<div class="results"></div> 
+		<div class="vars"></div> 
 		
 	</div>
 	
