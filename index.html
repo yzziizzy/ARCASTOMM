@@ -109,6 +109,19 @@
 				
 				var mat = getTransformMatrix(c);
 				
+				var mod1, mod2;
+				for(var i = 0; i < 100; i++) {
+					[mod1, mat] = optimize_op(mat, constant_fold);
+					if(mod1) {
+						continue;
+					}
+					else {
+						console.log("optimization rounds: " + (i + 1));
+						break;
+					}
+				}
+// 				var mat = getTransformMatrix(c);
+				
 				e.innerHTML = printXP(txtPrintFns, mat);
 				
 				cont.appendChild(e);
@@ -122,7 +135,6 @@
 		var o = {};
 		
 		for(var opt of cont) {
-			console.log(opt);
 			o[opt.name] = opt.value;
 		}
 		
@@ -174,7 +186,7 @@
 		mul: function(fns, xp) { return printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); },
 		add: function(fns, xp) { 
 // 			if(is_negative(xp.arg2)) {
-				return printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2); 
+				return '(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')'; 
 // 			}
 // 			else {
 // 				return printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2); 
@@ -185,7 +197,7 @@
 			for(var a = 0; a < 4; a++) {
 				acc += '[';
 				for(var b = 0; b < 4; b++) {
-					acc += printXP(fns, xp.arg1[a][b]) + ', ';
+					acc += printXP(fns, xp.arg1[a][b]) + (b < 3 ? ', ' : '');
 				}
 				acc += ']';
 			}
@@ -196,7 +208,6 @@
 	
 	
 	function printXP(fns, xp) {
-		console.log(xp, typeof(xp));
 		if(typeof(xp) == 'object') return fns[xp.op](fns, xp);
 		else return xp;
 	}
@@ -229,8 +240,8 @@
 	function neg(x) { return {op: 'neg', arg1: x}; };
 	function mul(x, y) { return {op: 'mul', arg1: x, arg2: y}; };
 	function add(x, y) { 
-		if(x instanceof Array) return {op: 'add', arg1ist: x};
-		else return {op: 'add', arg1: x, arg2: y}; 
+// 		if(x instanceof Array) return {op: 'add', arg1ist: x};
+		return {op: 'add', arg1: x, arg2: y}; 
 	};
 	function oneminus(x) { 
 		return add(1, neg(x));
@@ -316,6 +327,83 @@
 		}
 		
 	}
+	
+	function is_const(xp) {
+		return typeof(xp) == 'number';
+	}
+	
+	function constant_fold(op, a1, a2) {
+		
+		if(op == 'add') {
+			if(a1 == 0) return a2;
+			if(a2 == 0) return a1;
+			if(is_const(a1) && is_const(a2)) {
+				return a1 + a2;
+			}
+		}
+		
+		if(op == 'mul') {
+			if(a1 == 0 || a2 == 0) { 
+				return 0 
+			}
+			if(is_const(a1) && is_const(a2)) {
+				return a1 * a2;
+			}
+		}
+		
+		if(op == 'neg') {
+			if(a1 == 0) return 0;
+			if(is_const(a1)) {
+				return -a1;
+			}
+		}
+		
+		if(op == 'cos') {
+			if(a1 == 0) return 1;
+			if(a1 == 'pi') return 0;
+		}
+		if(op == 'sin') {
+			if(a1 == 'pi') return 1;
+			if(a1 == 0) return 0;
+		}
+		
+		return false;
+	}
+	
+	
+	function optimize_op(xp, fn) {
+		if(typeof(xp) != 'object') {
+			return [false, xp];
+		}
+		
+		var modified = false;
+		
+		if(xp.op == 'mat') {
+			var o = [];
+			for(var a = 0; a < 4; a++) {
+				o[a] = [];
+				for(var b = 0; b < 4; b++) {
+					var z = optimize_op(xp.arg1[a][b], fn);
+					o[a][b] = z[1];
+					
+					modified = modified || z[0];
+				}
+			}
+			return [modified, {op: 'mat', arg1: o}];
+		}
+		
+		var [m1, a1] = optimize_op(xp.arg1, fn);
+		var [m2, a2] = optimize_op(xp.arg2, fn);
+		
+		var out = fn(xp.op, a1, a2);
+		
+		if(out === false) {
+			return [m1 || m2, {op: xp.op, arg1: a1, arg2: a2}];
+		}
+		else return [true, out];
+	}
+	
+	
 	
 </script>
 
