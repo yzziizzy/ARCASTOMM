@@ -175,8 +175,8 @@
 				varnum: 1,
 			};
 			
-// 			factor_ovars(context);
-// 			factor_ovars(context);
+//  			factor_ovars(context);
+//  			factor_ovars(context);
 			
 // 			context.xp = fullyOptimize(context.xp, [combine_terms]);
 			
@@ -821,6 +821,8 @@
 			var mc = 0;
 			var cnst = 1;
 			var o = [];
+			var t_exist = [];
+			var t_add = [];
 			
 			for(var x of a1) {
 				if(x == 0) {
@@ -840,14 +842,46 @@
 				}
 				
 
+				if(is_op(x, 'term')) {
+					t_exist.push(x);
+					continue;
+				}
+				if(is_simple_term(x)) {
+					t_add.push(x);
+					continue;
+				}
 				
 				o.push(x);
 			}
 			
+			
+			//construct a term from the parts
+			var term = {op: 'term', arg1: 1, arg2: []}
+			if(t_exist.length > 0) {
+				for(var t of t_exist) {
+					term.arg2 = term.arg2.concat(t.arg2);
+					term.arg1 *= t.arg1;
+				}
+			}
+			
+			if(t_add.length > 0) {
+				term.arg2 = term.arg2.concat(t_add);
+			}
+			
+			if(term.arg2.length > 0) {
+				term.arg1 *= cnst;
+				cnst = 1;
+				o.push(term);
+			}
+			else {
+				cnst *= term.arg1;
+			}
+			
+			
 			m = m || mc > 1;
 			
 			if(o.length == 0) return cnst;
-			if(!m) return false;
+			if(!m && t_exist.length <= 1 && t_add.length == 0) return false;
 			
 			if(cnst != 1) o.push(cnst);
 			return {op: 'mul', arg1: o};
@@ -922,33 +956,73 @@
 	
 	// applies the distributive property of multiplication and addition widely
 	function distribute_terms(op, a1, a2, xp) {
-		if(op == 'mul') {
+		if(op != 'mul') return false;
+		if(a1.length == 1) return a1[0];
+		
+		var mult = a1.slice();
+		var reject = [];
+		
+		var a = mult.pop();
+		while(mult.length > 0) {
+			var b = mult.pop();
+			
+			var o = simple_distribute(a, b);
+			if(o === false) {
+				console.log("failed to distribute: ", a, b );
+				reject.push(a);
+				a = b;
+				continue;
+			}
+			
+			a = o;
+		}
+		
+		if(reject.length > 0) {
+			reject.push(a);
+			return {op: 'mul', arg1: reject};
+		}
+		
+		return a;
+		
+		function simple_distribute(a1, a2) {
+			var o = [];
+			if(is_num(a1) && is_num(a2)) {
+				return a1 * a2;
+			} 
+			if(is_op(a1, 'term') && is_num(a2)) {
+				return {op: 'term', arg1: a1.arg1 * a2, arg2: a1.arg2};
+			} 
+			if(is_op(a2, 'term') && is_num(a1)) {
+				return {op: 'term', arg1: a2.arg1 * a1, arg2: a2.arg2};
+			} 
+			
 			if(is_op(a1, 'add') && is_op(a2, 'add')) {
 				
-				return add([
-					mul(a1.arg1, a2.arg1), 
-					mul(a1.arg2, a2.arg2),
-					mul(a1.arg2, a2.arg1), 
-					mul(a1.arg2, a2.arg1)
-				]);
+				for(var i of a1.arg1) {
+					for(var j of a2.arg1) {
+						o.push(mul(i, j));
+					}
+				}
+				return add(o);
 			}
 			
-			if(is_op(a1, 'add') && is_op(a2, 'term')) {
-				
-				return add(mul(a1.arg1, a2), mul(a1.arg2, a2));
+			if(is_op(a1, 'add') && (is_op(a2, 'term') || is_num(a2) || is_builtin(a2))) {
+					
+				for(var i of a1.arg1) {
+					o.push(mul(i, a2));
+				}
+				return add(o);
 			}
 			
-			if(is_op(a1, 'term') && is_op(a2, 'add')) {
-				
-				return add(mul(a2.arg1, a1), mul(a2.arg2, a1));
+			if((is_op(a1, 'term') || is_num(a1) || is_builtin(a1)) && is_op(a2, 'add')) {
+					
+				for(var i of a2.arg1) {
+					o.push(mul(i, a1));
+				}
+				return add(o);
 			}
 			
-			if((is_num(a1) || is_builtin(a1)) && is_op(a2, 'add')) {
-				return add(mul(a1, a2.arg1), mul(a1, a2.arg2));
-			}
-			if((is_num(a2) || is_builtin(a2)) && is_op(a1, 'add')) {
-				return add(mul(a2, a1.arg1), mul(a2, a1.arg2));
-			}
+			return false;
 		}
 		
 		return false;
