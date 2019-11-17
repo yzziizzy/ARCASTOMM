@@ -967,6 +967,17 @@
 		return {op: 'vec', arg1: out};
 	}
 	
+	function termKey(t) {
+		if(!t.termKey) {
+			t.termKey = t.arg2.slice()
+				.map(function(xp) { return printXP(txtPrintFns, xp) })
+				.sort()
+				.join(':');
+		}
+		
+		return t.termKey;
+	}
+	
 	function terms_are_equal(a, b) {
 		var aa = a.arg2.slice().map(function(xp) { return printXP(txtPrintFns, xp) }).sort().join(':');
 		var bb = b.arg2.slice().map(function(xp) { return printXP(txtPrintFns, xp) }).sort().join(':');
@@ -975,19 +986,53 @@
 	
 	function combine_terms(op, a1, a2, xp) {
 		if(op == 'add') {
-				
-			if(is_op(a1, 'term') && is_op(a2, 'term')) {
-				if(terms_are_equal(a1, a2)) {
-					var sum = a1.arg1 + a2.arg1;
-					if(sum == 0) return 0;
-					
-					return {
-						op: 'term',
-						arg1: sum,
-						arg2: a1.arg2,
-					}
+			if(a1.length == 1) return a1[0];
+			
+			var out = [];
+			var cache = {};
+			
+			// group all the terms by key
+			for(var t of a1) {
+				if(is_op(t, 'term')) {
+					var k = termKey(t);
+					cache[k] = cache[k] || [];
+					cache[k].push(t);
+				}
+				else {
+					out.push(t)
 				}
 			}
+			
+			var modified = false;
+			
+			for(var k in cache) {
+				var list = cache[k];
+				
+				// push singular terms directly to output
+				if(list.length == 1) {
+					out.push(list[0]);
+					continue;
+				}
+				
+				modified = true;
+				// combine common terms
+				var sum = 0;
+				for(var t of list) {
+					sum += t.arg1;
+				}
+				
+				out.push({
+					op: 'term',
+					arg1: sum,
+					arg2: list[0].arg2,
+				});
+			}
+			
+			if(!modified) return false;
+			
+			if(out.length == 1) return out[0];
+			
+			return add(out);
 		}
 		
 		return false;
