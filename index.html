@@ -58,12 +58,15 @@
 	output multiply by vector instead of matrix
 	put trig fns in variables 
 	code output options
+		variable naming scheme
+		don't ghost existing user vars
+		output var names
 	check correct matrix multiply order
 	optimize out arbitrary expressions instead of just terms
 	deg/rad input option
 	fractions of pi
 	option to precalculate constant trig fns
-	combine like terms
+	row major/column major code output option
 	
 	*/
 	
@@ -140,8 +143,8 @@
 		
 		addTransform(-1, {transform: 'rotAxis', X: 4, Y:5, Z: 6, Theta: 2});
 		addTransform(-1, {transform: 'rotAxis', X: 7, Y:2, Z: 9, Theta: 1});
-		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
-		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
+// 		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
+// 		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
 		
 		$ev('.output button[name="clear"]', 'click', function(e) { // todo: debounce
 			chain = [];
@@ -155,8 +158,7 @@
 			var cont = $('.output .results');
 			
 			var handedness = $('.options input[name="handedness"]:checked').value;
-			
-			console.log(handedness);
+			var vector_output = $('.options input[name="matvec_output"]:checked').value;
 			
 			var mchain = null; 
 			
@@ -165,17 +167,17 @@
 				
 				var mat = getTransformMatrix(c, handedness);
 				
-				var mod1, mod2;
-				for(var i = 0; i < 100; i++) {
-					[mod1, mat] = optimize_op(mat, constant_fold);
-					if(mod1) {
-						continue;
-					}
-					else {
-						console.log("optimization rounds: " + (i + 1));
-						break;
-					}
-				}
+// 				var mod1, mod2;
+// 				for(var i = 0; i < 100; i++) {
+// 					[mod1, mat] = optimize_op(mat, constant_fold);
+// 					if(mod1) {
+// 						continue;
+// 					}
+// 					else {
+// 						console.log("optimization rounds: " + (i + 1));
+// 						break;
+// 					}
+// 				}
 // 				var mat = getTransformMatrix(c);
 				
 				if(mchain === null) {
@@ -190,6 +192,9 @@
 // 				cont.appendChild(e);
 			}
 			
+			if(vector_output == 'vector') {
+				mchain = mul({op: 'vec', arg1: [uvar('X'), uvar('Y'), uvar('Z'), uvar('W')]}, mchain)
+			}
 			
 // 			cont.innerHTML = printXP(txtPrintFns, mchain);
 			
@@ -206,6 +211,7 @@
 			factor_ovars(context);
 			factor_ovars(context);
 			
+			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
 			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
 	
 			
@@ -438,6 +444,14 @@
 				return '(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')'; 
 			}
 		},
+		vec: function(fns, xp) {
+			var acc = '[';
+			for(var b = 0; b < 4; b++) {
+				acc += printXP(fns, xp.arg1[b]) + (b < 3 ? ', ' : '');
+			}
+			acc += ']';
+			return acc;
+		},
 		mat: function(fns, xp) {
 			var acc = '[';
 			for(var a = 0; a < 4; a++) {
@@ -497,6 +511,16 @@
 			else {
 				return '(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')'; 
 			}
+		},
+		vec: function(fns, xp) {
+			var acc = '<table class="matrix">';
+			acc += '<tr>';
+			for(var b = 0; b < 4; b++) {
+				acc += '<td>' + printXP(fns, xp.arg1[b]) + '</td>';
+			}
+			acc += '</tr>';
+			acc += '</table>';
+			return acc;
 		},
 		mat: function(fns, xp) {
 			var acc = '<table class="matrix">';
@@ -558,12 +582,21 @@
 				return '<span class="_add">(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')</span>'; 
 			}
 		},
+		vec: function(fns, xp) {
+			var acc = '<table class="matrix _matrix">';
+			var labels = ["X'", "Y'", "Z'", "W'"];
+			for(var b = 0; b < 4; b++) {
+				acc += '<tr><td>' + labels[b] + ' = ' + printXP(fns, xp.arg1[b]) + '</td></tr>';
+			}
+			acc += '</table>';
+			return acc;
+		},
 		mat: function(fns, xp) {
 			var acc = '<table class="matrix _matrix">';
 			for(var a = 0; a < 4; a++) {
 				acc += '<tr>';
 				for(var b = 0; b < 4; b++) {
-					acc += '<td>' + printXP(fns, xp.arg1[a][b]) + '</td>';
+					acc += '<td> ' + printXP(fns, xp.arg1[a][b]) + '</td>';
 				}
 				acc += '</tr>';
 			}
@@ -766,10 +799,13 @@
 		return false;
 	}
 	function is_const(xp) {
-		return is_num(xp) || (is_builtin(xp) && is_const(xp.arg1)) || is_op(xp, 'uvar');
+		return is_num(xp) 
+			|| (is_builtin(xp) && is_const(xp.arg1)) 
+			|| is_op(xp, 'uvar') 
+			|| is_op(xp, 'ovar'); // maybe not this one
 	}
 	function is_simple_term(xp) {
-		if(is_num(xp) || (is_builtin(xp) && is_const(xp.arg1))) return true;
+		if(is_num(xp) || (is_const(xp))) return true;
 		if(xp.op == 'add') {
 			if(!(is_num(xp.arg1[0]) || is_num(xp.arg1[1]))) return false;
 			if(!(is_builtin(xp.arg1[0]) || is_builtin(xp.arg1[1]))) return false;
@@ -829,6 +865,10 @@
 			// not exactly constant folding below here
 			if(is_matrix(a1[0]) && is_matrix(a1[1])) {
 				return mat_mul(a1[0], a1[1]);
+			}
+			
+			if(is_matrix(a1[0]) && is_op(a1[1], 'vec')) {
+				return matvec_mul(a1[0], a1[1]);
 			}
 			
 			// collapse constants
@@ -1052,7 +1092,7 @@
 			
 			var o = simple_distribute(a, b);
 			if(o === false) {
-				console.log("failed to distribute: ", a, b );
+// 				console.log("failed to distribute: ", a, b );
 				reject.push(a);
 				a = b;
 				continue;
@@ -1090,7 +1130,7 @@
 				return add(o);
 			}
 			
-			if(is_op(a1, 'add') && (is_op(a2, 'term') || is_num(a2) || is_builtin(a2))) {
+			if(is_op(a1, 'add') && (is_op(a2, 'term') || is_num(a2) || is_const(a2))) {
 					
 				for(var i of a1.arg1) {
 					o.push(mul(i, a2));
@@ -1098,7 +1138,7 @@
 				return add(o);
 			}
 			
-			if((is_op(a1, 'term') || is_num(a1) || is_builtin(a1)) && is_op(a2, 'add')) {
+			if((is_op(a1, 'term') || is_num(a1) || is_const(a1)) && is_op(a2, 'add')) {
 					
 				for(var i of a2.arg1) {
 					o.push(mul(i, a1));
