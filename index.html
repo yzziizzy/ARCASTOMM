@@ -140,16 +140,17 @@
 			$('.controls .transform-type').selectedIndex = 0;
 		})
 		
-		addTransform(-1, {transform: 'rotAxis', X: 4, Y:5, Z: 6, Theta: 2});
-		addTransform(-1, {transform: 'rotAxis', X: 7, Y:2, Z: 9, Theta: 1});
-		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
-		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
+		addTransform(-1, {transform: 'rotAxis', X: uvar('a'), Y:uvar('b'), Z: uvar('c'), Theta: uvar('d')});
+		addTransform(-1, {transform: 'rotAxis', X: uvar('e'), Y:uvar('f'), Z: uvar('g'), Theta: uvar('h')});
+		addTransform(-1, {transform: 'scale', X: uvar('i'), Y: uvar('j'), Z: uvar('k')});
+		addTransform(-1, {transform: 'rotAxis', X: uvar('p'), Y: uvar('m'), Z: uvar('n'), Theta: uvar('o')});
 		
 		$ev('.output button[name="clear"]', 'click', function(e) { // todo: debounce
 			chain = [];
 			$('.chain').innerHTML = '';
 			$('.output .results').innerHTML = '';
 			$('.output .vars').innerHTML = '';
+			$('.output .code').innerHTML = '';
 		});
 		
 		$ev('.output button[name="solve"]', 'click', function(e) { // todo: debounce
@@ -159,6 +160,13 @@
 			var handedness = $('.options input[name="handedness"]:checked').value;
 			var vector_output = $('.options input[name="matvec_output"]:checked').value;
 			
+			var O = {};
+			var m = $all('.CAS-options input[type="checkbox"]').forEach(function(x) {
+				O[x.name] = !!x.checked;
+			});
+			
+			
+			
 			var mchain = null; 
 			
 			for(var c of chain) {
@@ -166,29 +174,8 @@
 				
 				var mat = getTransformMatrix(c, handedness);
 				
-// 				var mod1, mod2;
-// 				for(var i = 0; i < 100; i++) {
-// 					[mod1, mat] = optimize_op(mat, constant_fold);
-// 					if(mod1) {
-// 						continue;
-// 					}
-// 					else {
-// 						console.log("optimization rounds: " + (i + 1));
-// 						break;
-// 					}
-// 				}
-// 				var mat = getTransformMatrix(c);
-				
-				if(mchain === null) {
-					mchain = mat;
-				}
-				else {
-					mchain = mul(mat, mchain);
-				}
-				
-// 				e.innerHTML = printXP(txtPrintFns, mat);
-				
-// 				cont.appendChild(e);
+				if(mchain === null) mchain = mat;
+				else mchain = mul(mat, mchain);
 			}
 			
 			if(vector_output == 'vector') {
@@ -204,19 +191,29 @@
 				varnum: 1,
 			};
 			
-			factor_builtins(context);
+			if(O.factor_trig) {
+				factor_builtins(context);
+			}
 			
-			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
+			context.xp = fullyOptimize(context.xp, [multiply_matrices_and_vectors]);
 			
-			factor_ovars(context);
-			factor_ovars(context);
-			factor_ovars(context);
-			factor_ovars(context);
+			var optFns = [];
+			if(O.constant_fold) optFns.push(constant_fold);
+			if(O.distribute) optFns.push(distribute_terms);
+			optFns.push(combine_terms);
 			
-			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
-			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
+			context.xp = fullyOptimize(context.xp, optFns);
+			
+			if(O.factor_terms) {
+				factor_ovars(context);
+				factor_ovars(context);
+				factor_ovars(context);
+				factor_ovars(context);
+			}
+			
+			context.xp = fullyOptimize(context.xp, optFns);
 	
-			
+			$('.output .vars').innerHTML = '';
 			for(var k in context.vardef) {
 				var d = printXP(debugPrintFns, context.vardef[k]);
 // 				d += printXP(debugPrintFns, context.vardef[k][1]);
@@ -253,12 +250,8 @@
 		
 		walk_ops(context.xp, function(xp) {
 			if(xp.op == 'term') {
-// 				console.log('len', xp.arg2.length);
-// 				console.log('===');
 				for(t1 in xp.arg2) {
-// 					console.log('---');
 					for(var t2 = (t1|0) + 1; t2 < xp.arg2.length; t2++) {
-// 						console.log(t1, t2, xp.arg2.length);
 						var p = printXP(txtPrintFns, xp.arg2[t1]);
 						var q = printXP(txtPrintFns, xp.arg2[t2]);
 						var key = p+':'+q;
@@ -340,7 +333,6 @@
 				
 				var k = printXP(txtPrintFns, xp);
 				terms[k] = xp;
-				console.log('xp', xp)
 			}
 			
 		});
@@ -479,7 +471,7 @@
 		},
 		vec: function(fns, xp, opts) {
 			var acc = '\n';
-			labels = ['X', 'Y', 'Z', 'W'];
+			labels = ['X2', 'Y2', 'Z2', 'W2'];
 			for(var b = 0; b < 4; b++) {
 				acc += opts.scalarDecl + ' ' + labels[b] + ' = '
 					+ printCodeXP(fns, xp.arg1[b], opts) + opts.lineTerm + '\n';
@@ -497,13 +489,19 @@
 			return acc;
 		},
 		term: function(fns, xp, opts) {
-			var acc = '(' + xp.arg1 + ' * ';
+			var acc = '';
+// 			acc += '(';
+			
+			if(xp.arg1 != 1) {
+				if(xp.arg1 == -1) acc += '-';
+				else acc += xp.arg1 + ' * ';
+			}
 			
 			acc += xp.arg2.map(function(x) {
 				return printCodeXP(fns, x, opts);
 			}).join(' * ');
 			
-			acc += ')';
+// 			acc += ')';
 			
 			return acc;
 		}
@@ -655,35 +653,14 @@
 		sin: function(fns, xp) { return '<span class="_sin">sin(' + printXP(fns, xp.arg1) + ')</span>'; },
 		neg: function(fns, xp) { return '<span class="_neg">-' + printXP(fns, xp.arg1) + '</span>'; },
 		mul: function(fns, xp) { 
-			
 			return '<span class="_mul">' + 
 				xp.arg1.map(function(x) { return printXP(fns, x); }).join(' * ') +
 				'</span>';
-			
-			if(is_op(xp.arg1, 'add') && is_op(xp.arg2, 'add')) {
-				return '<span class="_mul">' + printXP(fns, xp.arg1) + '</span>';
-			}
-			if((is_num(xp.arg1) || is_builtin(xp.arg1)) && is_op(xp.arg2, 'add')) {
-				return '<span class="_mul">' + printXP(fns, xp.arg1) + '</span>';
-			}
-			if((is_num(xp.arg2) || is_builtin(xp.arg2)) && is_op(xp.arg1, 'add')) {
-				return '<span class="_mul">' + printXP(fns, xp.arg2) + printXP(fns, xp.arg1) + '</span>';
-			}
-			
-			return '<span class="_mul">' + printXP(fns, xp.arg1) + ' * ' + printXP(fns, xp.arg2); 
 		},
 		add: function(fns, xp) { 
-			
 			return '<span class="_add">(' + 
 				xp.arg1.map(function(x) { return printXP(fns, x); }).join(' + ') +
 				')</span>';
-			
- 			if(is_op(xp.arg2, 'neg')) {
-				return '<span class="_add">(' + printXP(fns, xp.arg1) + ' - ' + printXP(fns, xp.arg2.arg1) + ')</span>'; 
-			}
-			else {
-				return '<span class="_add">(' + printXP(fns, xp.arg1) + ' + ' + printXP(fns, xp.arg2) + ')</span>'; 
-			}
 		},
 		vec: function(fns, xp) {
 			var acc = '<table class="matrix _matrix">';
@@ -707,8 +684,11 @@
 			return acc;
 		},
 		term: function(fns, xp) {
-			var acc = '<span class="_term">' + (xp.arg1 == 1 ? '' : xp.arg1);
-			
+			var acc = '<span class="_term">';
+			if(xp.arg1 != 1) {
+				if(xp.arg1 == -1) acc += '-';
+				else acc += xp.arg1;
+			}
 			for(var c of xp.arg2) {
 				acc += printXP(fns, c);
 			}
@@ -909,7 +889,7 @@
 	function is_const(xp) {
 		return is_num(xp) 
 			|| (is_builtin(xp) && is_const(xp.arg1)) 
-// 			|| is_op(xp, 'uvar') // uncomment to distribute uvars
+			|| is_op(xp, 'uvar') // uncomment to distribute uvars
 			|| is_op(xp, 'ovar'); // maybe not this one
 	}
 	function is_simple_term(xp) {
@@ -924,14 +904,33 @@
 		return typeof(xp) == 'object' && xp.op == 'mat';
 	}
 	
+	function multiply_matrices_and_vectors(op, a1, a2, xp) {
+		if(op == 'mul') {
+			if(is_matrix(a1[0]) && is_op(a1[1], 'vec')) {
+				return matvec_mul(a1[0], a1[1]);
+			}
+			// BUG: probably a problem with mat*vec commutativity
+			if(is_matrix(a1[1]) && is_op(a1[0], 'vec')) {
+				return matvec_mul(a1[1], a1[0]);
+			}
+			
+			if(is_matrix(a1[0]) && is_matrix(a1[1])) {
+				return mat_mul(a1[0], a1[1]);
+			}
+		}
+		
+		return false;
+	}
+	
 	function constant_fold(op, a1, a2, xp) {
 		
 		if(op == 'add') {
 			// eliminate additions of length 1
 			if(a1.length == 1) return a1[0];
 			
-			var m = false;
-			var mc = 0;
+			var m = false; // modified flag, for concatenated add-children
+			var mc = 0; // counting combined constants
+			var mz = 0; // counting removed zeros
 			var cnst = 0;
 			var o = [];
 			
@@ -939,6 +938,7 @@
 				if(is_num(x)) {
 					cnst += x;
 					mc++;
+					if(x == 0) mz++;
 					continue;
 				}
 				
@@ -955,7 +955,7 @@
 			
 			if(o.length == 0) return cnst;
 			
-			if(!m  /* && !(mc > 0 && cnst == 0)*/) return false;
+			if(!m && mz == 0 /* && !(mc > 0 && cnst == 0)*/) return false;
 			
 			
 			if(cnst != 0) o.push(cnst);
@@ -969,15 +969,6 @@
 			
 			// eliminate additions of length 1
 			if(a1.length == 1) return a1[0];
-			
-			// not exactly constant folding below here
-			if(is_matrix(a1[0]) && is_matrix(a1[1])) {
-				return mat_mul(a1[0], a1[1]);
-			}
-			
-			if(is_matrix(a1[0]) && is_op(a1[1], 'vec')) {
-				return matvec_mul(a1[0], a1[1]);
-			}
 			
 			// collapse constants
 			var m = false;
@@ -1469,6 +1460,28 @@
 					<input name="handedness" type="radio" class="checkbox" value="right" checked/>
 					<span>Right (OpenGL)</span>
 				</div>
+			</fieldset>
+		</div>
+		<div class="opt">
+			<fieldset class="CAS-options">
+				<legend>CAS Options</legend>
+				<div>
+					<input name="distribute" type="checkbox" class="checkbox" />
+					<span>Distribute</span>
+				</div>
+				<div>
+					<input name="factor_terms" type="checkbox" class="checkbox" checked />
+					<span>Factor Terms</span>
+				</div>
+				<div>
+					<input name="constant_fold" type="checkbox" class="checkbox" checked />
+					<span>Fold Constants</span>
+				</div>
+				<div>
+					<input name="factor_trig" type="checkbox" class="checkbox" checked />
+					<span>Factor Trig Fns</span>
+				</div>
+			
 			</fieldset>
 		</div>
 	</div>
