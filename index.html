@@ -55,8 +55,6 @@
 	/*
 	chain editing, cursor, delete
 	trim unused variables
-	output multiply by vector instead of matrix
-	put trig fns in variables 
 	code output options
 		variable naming scheme
 		don't ghost existing user vars
@@ -67,6 +65,7 @@
 	fractions of pi
 	option to precalculate constant trig fns
 	row major/column major code output option
+	count and compare number of operations
 	
 	*/
 	
@@ -143,8 +142,8 @@
 		
 		addTransform(-1, {transform: 'rotAxis', X: 4, Y:5, Z: 6, Theta: 2});
 		addTransform(-1, {transform: 'rotAxis', X: 7, Y:2, Z: 9, Theta: 1});
-// 		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
-// 		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
+		addTransform(-1, {transform: 'scale', X: 7, Y:2, Z: 9});
+		addTransform(-1, {transform: 'rotAxis', X: 3, Y:4, Z: 5, Theta: 6});
 		
 		$ev('.output button[name="clear"]', 'click', function(e) { // todo: debounce
 			chain = [];
@@ -198,8 +197,6 @@
 			
 // 			cont.innerHTML = printXP(txtPrintFns, mchain);
 			
-			mchain = fullyOptimize(mchain, [constant_fold, distribute_terms, combine_terms]);
-			
 			var context = {
 				xp: mchain,
 				vardef: {},
@@ -207,6 +204,11 @@
 				varnum: 1,
 			};
 			
+			factor_builtins(context);
+			
+			context.xp = fullyOptimize(context.xp, [constant_fold, distribute_terms, combine_terms]);
+			
+			factor_ovars(context);
 			factor_ovars(context);
 			factor_ovars(context);
 			factor_ovars(context);
@@ -216,14 +218,30 @@
 	
 			
 			for(var k in context.vardef) {
-				var d = printXP(debugPrintFns, context.vardef[k][0]);
-				d += printXP(debugPrintFns, context.vardef[k][1]);
+				var d = printXP(debugPrintFns, context.vardef[k]);
+// 				d += printXP(debugPrintFns, context.vardef[k][1]);
 				$('.vars').appendChild(mkElem('div', '', k + ' = ' + d));
 			}
 			
 // 			context.xp = fullyOptimize(context.xp, [combine_terms]);
 			
 			cont.innerHTML = printXP(debugPrintFns, context.xp);
+			
+			
+			var codeOpts = {
+				lineTerm: ';',
+				scalarDecl: 'float',
+			};
+			
+			var decls = '';
+			for(var k in context.vardef) {
+				decls += codeOpts.scalarDecl + ' ' + k + ' = ' 
+					+  printCodeXP(codePrintFns, context.vardef[k]) + codeOpts.lineTerm + '\n';
+			}
+			
+			$('.code').innerHTML = decls + printCodeXP(codePrintFns, context.xp, codeOpts);
+			
+			
 			
 		});
 	});
@@ -232,12 +250,6 @@
 		
 		var term_pairs = [];
 		var terms = {};
-		
-		function addTerms(list) {
-			var key = list.sort().join(':');
-			
-		}
-		
 		
 		walk_ops(context.xp, function(xp) {
 			if(xp.op == 'term') {
@@ -267,9 +279,6 @@
 			counts[x] = (counts[x]|0) + 1;
 		});
 		
-		
-		var varalloc = {};
-		var vardef = {};
 		var acounts = [];
 		for(var k in counts) {
 			if(counts[k] < 2) continue;
@@ -277,7 +286,7 @@
 			acounts.push([counts[k], k]); 
 			var v = 'o'+(context.varnum++);
 			context.varalloc[k] = v;
-			context.vardef[v] = terms[k];
+			context.vardef[v] = mul(terms[k]);
 		}
 		
 		var aa = acounts.sort(function(a,b) { return b[0] - a[0] });
@@ -313,6 +322,48 @@
 					arg1: a1,
 					arg2: out_arg2,
 				}
+			}
+			
+			return false;
+		});
+		
+	}
+	
+	function factor_builtins(context) {
+		
+		var terms = {};
+		
+		
+		walk_ops(context.xp, function(xp) {
+			if(xp.op == 'sin' || xp.op == 'cos') {
+				if(!is_const(xp)) return false;
+				
+				var k = printXP(txtPrintFns, xp);
+				terms[k] = xp;
+				console.log('xp', xp)
+			}
+			
+		});
+		
+		for(var k in terms) {
+			var v = 'o'+(context.varnum++);
+			context.varalloc[k] = v;
+			context.vardef[v] = terms[k];
+		}
+// 		console.log('vd', context.vardef);
+		
+		[xxx, context.xp] = optimize_op(context.xp, function(op, a1, a2) {
+			if(op == 'sin' || op == 'cos') {
+				
+				var k = printXP(txtPrintFns, {op: op, arg1: a1, arg2: a2});
+				var v = context.varalloc[k];
+				
+				if(!v) return false;
+				
+				return {
+					op: 'ovar',
+					arg1: v
+				};
 			}
 			
 			return false;
@@ -406,6 +457,58 @@
 	function is_op(xp, op) {
 		return (typeof(xp) == 'object' && xp.op == op);
 	}
+	
+	var codePrintFns = {
+		num: function(fns, xp, opts) { return xp + ''; },
+		ovar: function(fns, xp, opts) { return xp.arg1 + ''; },
+		uvar: function(fns, xp, opts) { return xp.arg1 + ''; },
+		cos: function(fns, xp, opts) { return 'cos(' + printCodeXP(fns, xp.arg1, opts) + ')'; },
+		sin: function(fns, xp, opts) { return 'sin(' + printCodeXP(fns, xp.arg1, opts) + ')'; },
+		neg: function(fns, xp, opts) { return '-' + printCodeXP(fns, xp.arg1, opts); },
+		mul: function(fns, xp, opts) { 
+			
+			return '(' + 
+				xp.arg1.map(function(x) { return printCodeXP(fns, x, opts); }).join(' * ') +
+				')';
+		},
+		add: function(fns, xp, opts) { 
+			
+			return '(' + 
+				xp.arg1.map(function(x) { return printCodeXP(fns, x, opts); }).join(' + ') +
+				')';
+		},
+		vec: function(fns, xp, opts) {
+			var acc = '\n';
+			labels = ['X', 'Y', 'Z', 'W'];
+			for(var b = 0; b < 4; b++) {
+				acc += opts.scalarDecl + ' ' + labels[b] + ' = '
+					+ printCodeXP(fns, xp.arg1[b], opts) + opts.lineTerm + '\n';
+			}
+			return acc;
+		},
+		mat: function(fns, xp, opts) {
+			var acc = '\n';
+			for(var a = 0; a < 4; a++) {
+				for(var b = 0; b < 4; b++) {
+					acc += 'm[' + a + '][' + b + '] = '
+						+ printCodeXP(fns, xp.arg1[a][b], opts) + opts.lineTerm + '\n';
+				}
+			}
+			return acc;
+		},
+		term: function(fns, xp, opts) {
+			var acc = '(' + xp.arg1 + ' * ';
+			
+			acc += xp.arg2.map(function(x) {
+				return printCodeXP(fns, x, opts);
+			}).join(' * ');
+			
+			acc += ')';
+			
+			return acc;
+		}
+	}
+	
 	
 	var txtPrintFns = {
 		ovar: function(fns, xp) { return xp.arg1 + ''; },
@@ -620,6 +723,11 @@
 		else return xp;
 	}
 	
+	function printCodeXP(fns, xp, opts) {
+		if(typeof(xp) == 'object') return fns[xp.op](fns, xp, opts);
+		else return fns['num'](fns, xp, opts);
+	}
+	
 	
 	function is_negative(xp) {
 		if(typeof(xp) == 'object') {
@@ -801,7 +909,7 @@
 	function is_const(xp) {
 		return is_num(xp) 
 			|| (is_builtin(xp) && is_const(xp.arg1)) 
-			|| is_op(xp, 'uvar') 
+// 			|| is_op(xp, 'uvar') // uncomment to distribute uvars
 			|| is_op(xp, 'ovar'); // maybe not this one
 	}
 	function is_simple_term(xp) {
@@ -1371,7 +1479,7 @@
 		
 		<div class="results"></div> 
 		<div class="vars"></div> 
-		<div class="code"></div> 
+		<pre class="code"></pre> 
 		
 	</div>
 	
