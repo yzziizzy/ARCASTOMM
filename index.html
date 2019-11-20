@@ -207,8 +207,11 @@
 			if(O.factor_terms) {
 				factor_ovars(context);
 				factor_ovars(context);
-				factor_ovars(context);
-				factor_ovars(context);
+// 				factor_ovars(context);
+// 				factor_ovars(context);
+				
+				factor_terms(context);
+				factor_terms(context);
 			}
 			
 			context.xp = fullyOptimize(context.xp, optFns);
@@ -355,6 +358,108 @@
 				return {
 					op: 'ovar',
 					arg1: v
+				};
+			}
+			
+			return false;
+		});
+		
+	}
+	
+	// assumes arg1 is an array
+	function is_bare(xp) {
+		for(var x of xp.arg1) {
+			if(is_op(x, 'add') || is_op(x, 'mul')) return false;
+		}
+		return true;
+	}
+	
+	function factor_terms(context) {
+		
+		var terms = {};
+		var term_pairs = [];
+		
+		
+		walk_ops(context.xp, function(xp) {
+			if(xp.op == 'add' || xp.op == 'mul') {
+				if(!is_bare(xp)) return false;
+				
+				for(t1 in xp.arg1) {
+					for(var t2 = (t1|0) + 1; t2 < xp.arg1.length; t2++) {
+						var p = printXP(txtPrintFns, xp.arg1[t1]);
+						var q = printXP(txtPrintFns, xp.arg1[t2]);
+						var key = p+':'+q;
+						terms[key] = [xp.arg1[t1], xp.arg1[t2]];
+						term_pairs.push(key);
+					}
+				}
+			}
+			
+		});
+		
+		var counts = {}
+		
+		term_pairs.map(function(x) {
+			counts[x] = (counts[x]|0) + 1;
+		});
+		
+		var acounts = [];
+		for(var k in counts) {
+			if(counts[k] < 2) continue;
+			
+			var kk = k.split(':');
+			acounts.push([counts[k], k, kk[0], kk[1], terms[k][0], terms[k][1]]); 
+			var v = 'ot'+(context.varnum++);
+			context.varalloc[k] = v;
+			context.vardef[v] = mul(terms[k]);
+		}
+		
+// 		console.log('vd', context.vardef);
+		var aa = acounts.sort(function(a,b) { return b[0] - a[0] });
+		console.log(aa);
+		
+		// TODO: this section is horribly inefficient
+		[xxx, context.xp] = optimize_op(context.xp, function(op, a1, a2) {
+			if(op == 'add' || op == 'mul') {
+				if(!is_bare({arg1: a1})) return false;
+				
+				var out = [];
+				
+				var xpcounts = {};
+				var xpcache = {};
+				for(var x of a1) {
+					var k = printXP(txtPrintFns, x);
+					xpcounts[k] = (xpcache[k]|0) + 1;
+					xpcache[k] = x;
+				}
+				
+				// look through the list, looping through the options, taking the best one
+				for(var a of aa) {
+					if(xpcounts[a[2]] > 0 && xpcounts[a[3]] > 0) {
+						var v = context.varalloc[a[1]];
+						
+						out.push(v);
+						xpcounts[a[2]]--;
+						xpcounts[a[3]]--;
+					}
+				}
+				
+				// push on the remainders
+				for(var k in xpcounts) {
+					var a = xpcounts[k];
+					for(var i = a|0; i > 0; i--) {
+						out.push(xpcache[k]);
+					}
+				}
+				
+// 				var k = printXP(txtPrintFns, {op: op, arg1: a1, arg2: a2});
+// 				var v = context.varalloc[k];
+				
+// 				if(!v) return false;
+				
+				return {
+					op: 'add',
+					arg1: out
 				};
 			}
 			
